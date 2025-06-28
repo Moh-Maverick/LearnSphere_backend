@@ -7,6 +7,8 @@ from groq import Groq
 from dotenv import load_dotenv
 import re
 import httpx
+import PyPDF2
+import io
 
 app = FastAPI()
 
@@ -84,9 +86,22 @@ async def create_planet(name: str = Form(...), authorization: str = Header(None)
     return res.data[0]
 
 async def fetch_note_content(note):
-    # Try to fetch the actual note content from file_url if available
     file_url = note.get("file_url")
-    if file_url:
+    if file_url and file_url.lower().endswith(".pdf"):
+        try:
+            async with httpx.AsyncClient() as client:
+                resp = await client.get(file_url)
+                if resp.status_code == 200:
+                    # Extract text from PDF
+                    pdf_reader = PyPDF2.PdfReader(io.BytesIO(resp.content))
+                    text = ""
+                    for page in pdf_reader.pages:
+                        text += page.extract_text() or ""
+                    return text
+        except Exception as e:
+            print("PDF extraction error:", e)
+            pass
+    elif file_url:
         try:
             async with httpx.AsyncClient() as client:
                 resp = await client.get(file_url)
@@ -94,7 +109,6 @@ async def fetch_note_content(note):
                     return resp.text
         except Exception:
             pass
-    # Fallback to content/text/body/title
     return note.get("content") or note.get("text") or note.get("body") or note["title"]
 
 @app.post("/ai-tutor")
@@ -219,26 +233,18 @@ async def summarize(request: Request, authorization: str = Header(None)):
         raise HTTPException(status_code=401, detail="Invalid token")
     user_id = user.user.id
 
-    # Fetch notes for the subject/planet
-    notes_res = supabase.table("notes").select("*").eq("planet_id", planet_id).eq("user_id", user_id).execute()
-    # Fetch actual content for each note
-    notes_texts = []
-    for n in notes_res.data:
-        content = await fetch_note_content(n)
-        notes_texts.append(content)
-    notes_text = "\n\n".join(notes_texts)
-
-    # Truncate to max chars for model context window
-    MAX_TOKENS = 120_000
-    MAX_CHARS = MAX_TOKENS * 4
-    if len(notes_text) > MAX_CHARS:
-        notes_text = notes_text[:MAX_CHARS]
+    # Fetch the specific note
+    notes_res = supabase.table("notes").select("*").eq("planet_id", planet_id).eq("user_id", user_id).eq("id", note_id).execute()
+    if not notes_res.data or len(notes_res.data) == 0:
+        raise HTTPException(status_code=404, detail="Note not found")
+    note = notes_res.data[0]
+    content = await fetch_note_content(note)
 
     # Prepare prompt for Groq AI
     prompt = (
-        "You are an AI summarizer. Summarize the following notes in a concise and clear way, using bullet points or short paragraphs where appropriate. "
+        "You are an AI summarizer. Summarize the following note in a concise and clear way, using bullet points or short paragraphs where appropriate. "
         "Focus on the key concepts, facts, and important details.\n\n"
-        f"Notes Content:\n{notes_text}\n\n"
+        f"Note Content:\n{content}\n\n"
         "Summary:"
     )
 

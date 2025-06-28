@@ -5,3 +5,4 @@ python-multipart
 httpx
 groq
 python-dotenv
+PyPDF2

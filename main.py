@@ -208,9 +208,9 @@ async def quiz_generator(request: Request, authorization: str = Header(None)):
 async def summarize(request: Request, authorization: str = Header(None)):
     data = await request.json()
     planet_id = data.get("planet_id")
-    topic = data.get("topic", "")
-    if not planet_id:
-        raise HTTPException(status_code=400, detail="Missing planet_id")
+    note_id = data.get("note_id")
+    if not planet_id or not note_id:
+        raise HTTPException(status_code=400, detail="Missing planet_id or note_id")
     if not authorization:
         raise HTTPException(status_code=401, detail="Missing token")
     token = authorization.replace("Bearer ", "")
